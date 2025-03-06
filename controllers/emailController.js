@@ -1,30 +1,36 @@
 const transporter = require("../config/mailConfig");
-const Email = require("../models/Email"); // Import model (if using DB)
+const Email = require("../models/Email");
 
 exports.sendEmail = async (req, res) => {
-  const { to, subject, message } = req.body;
+  const { to, subject, text } = req.body;
 
-  if (!to || !subject || !message) {
+  if (!to || !subject || !text) {
     return res.status(400).json({ error: "All fields are required!" });
   }
 
-  const mailOptions = {
-    from: process.env.ZOHO_USER,
-    to,
-    subject,
-    text: message,
-  };
-
   try {
-    await transporter.sendMail(mailOptions);
+    // Save email in MongoDB before sending
+    const emailRecord = new Email({ to, subject, text, status: "pending" });
+    await emailRecord.save();
 
-    // Save email to the database (optional)
-    const email = new Email({ to, subject, message });
-    await email.save();
+    const mailOptions = {
+      from: `"Your Name" <${process.env.EMAIL_USER}>`,
+      to,
+      subject,
+      text,
+    };
 
-    res.status(200).json({ success: "Email sent successfully!" });
+    let info = await transporter.sendMail(mailOptions);
+    console.log("✅ Email sent:", info.response);
+
+    // Update email status to 'sent'
+    await Email.findByIdAndUpdate(emailRecord._id, { status: "sent" });
+
+    res.status(200).json({ message: "Email sent successfully!" });
   } catch (error) {
-    console.error("Error sending email:", error);
-    res.status(500).json({ error: "Failed to send email." });
+    console.error("❌ Email sending error:", error);
+    await Email.findByIdAndUpdate(emailRecord._id, { status: "failed" });
+
+    res.status(500).json({ error: "Failed to send email", details: error.message });
   }
 };
